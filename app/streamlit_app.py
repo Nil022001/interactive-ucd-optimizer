@@ -1,97 +1,110 @@
-import os
 import joblib
-import numpy as np
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
+import folium
+from streamlit_folium import st_folium
+import numpy as np
+import branca.colormap as cm
 
-st.set_page_config(page_title="UCD Optimizer", layout="wide")
+st.set_page_config(page_title="Kolkata UCD Optimizer (1km)", layout="wide")
 
-st.title("Interactive City-wide Cooling Demand Optimizer")
-st.write("Sweep one attribute at a time and find the minimum predicted city-wide demand.")
-
-# ---------------------------------------------------------
-# Files you will upload later into these repo folders:
-#   data/baseline_2019_pixels.csv
-#   models/model_BLOCKA_UCD_BH_noBV.joblib
-# ---------------------------------------------------------
-DATA_PATH = "data/baseline_2019_pixels.csv"
-MODEL_PATH = "models/model_BLOCKA_UCD_BH_noBV.joblib"
+DATA_PARQUET = "data/pixels_baseline_2019.parquet"
+MODEL_FILE = "models/ucd_model.joblib"
 
 @st.cache_data
-def load_baseline(path):
-    return pd.read_csv(path)
+def load_pixels():
+    return pd.read_parquet(DATA_PARQUET)
 
 @st.cache_resource
-def load_model(path):
-    return joblib.load(path)
+def load_model():
+    return joblib.load(MODEL_FILE)
 
-if not os.path.exists(DATA_PATH):
-    st.error(f"Missing baseline file: {DATA_PATH} (upload it to the data/ folder)")
-    st.stop()
+st.title("Interactive Urban Cooling Demand (UCD) — Kolkata (1 km × 1 km)")
+st.caption("Basemap + 1 km pixels colored by UCD (yellow→red). Click a pixel to inspect it.")
 
-if not os.path.exists(MODEL_PATH):
-    st.error(f"Missing model file: {MODEL_PATH} (upload it to the models/ folder)")
-    st.stop()
+df = load_pixels()
+bundle = load_model()
 
-df = load_baseline(DATA_PATH)
-model = load_model(MODEL_PATH)
+model = bundle["model"]
+features = bundle["features"]
 
-# ---------------------------------------------------------
-# IMPORTANT: Edit these feature names to match your model
-# ---------------------------------------------------------
-FEATURE_COLS = ["T2", "RH", "infil", "bldh", "ahem"]  # BH_noBV example
+# Predict baseline UCD using the saved model
+df["ucd_pred"] = model.predict(df[features].values)
 
-TARGET_KIND = st.sidebar.selectbox("Target kind", ["UCD (W/m²)", "W/person"])
+# Sidebar controls
+st.sidebar.header("Controls")
+color_mode = st.sidebar.selectbox(
+    "Color pixels by",
+    ["Predicted UCD (W m⁻²)", "Simulated UCD (y_ucd_wm2)"],
+    index=0
+)
 
-CELL_AREA_M2 = st.sidebar.number_input("Cell area (m²)", value=1_000_000.0, step=10_000.0)
+val_col = "ucd_pred" if color_mode.startswith("Predicted") else "y_ucd_wm2"
 
-if TARGET_KIND == "W/person" and "pop" not in df.columns:
-    st.error("For W/person target, baseline must contain a 'pop' column.")
-    st.stop()
+# Build a robust yellow->red colormap using percentiles (prevents outliers dominating)
+vals = df[val_col].astype(float).values
+vmin = float(np.nanpercentile(vals, 2))
+vmax = float(np.nanpercentile(vals, 98))
+if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+    vmin = float(np.nanmin(vals))
+    vmax = float(np.nanmax(vals)) if float(np.nanmax(vals)) > vmin else (vmin + 1.0)
 
-st.sidebar.header("Policy sweep")
-sweep_feature = st.sidebar.selectbox("Feature to sweep", FEATURE_COLS)
+colormap = cm.LinearColormap(
+    colors=["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"],  # yellow -> red
+    vmin=vmin,
+    vmax=vmax
+)
+colormap.caption = f"{val_col} (W m⁻²)"
 
-q05 = float(df[sweep_feature].quantile(0.05))
-q95 = float(df[sweep_feature].quantile(0.95))
+# Map center
+center_lat = float(df["lat"].mean())
+center_lon = float(df["lon"].mean())
 
-x_min = st.sidebar.number_input("Sweep min", value=q05)
-x_max = st.sidebar.number_input("Sweep max", value=q95)
+m = folium.Map(location=[center_lat, center_lon], zoom_start=11, tiles="OpenStreetMap")
 
-n_points = st.sidebar.slider("Number of sweep points", 5, 60, 25)
+# Add pixels as colored circle markers
+for _, r in df.iterrows():
+    val = float(r[val_col])
+    color = colormap(val)
 
-policy_mode = st.sidebar.radio("Policy mode", ["set_uniform", "clip"], index=0)
+    tooltip = (
+        f"pixel: {r['pixel_group']}<br>"
+        f"{val_col}: {val:.3f} W/m²<br>"
+        f"T2: {r['T2']:.2f} K | RH: {r['RH']:.2f}%<br>"
+        f"bvol: {r['bvol']:.1f} | bldh: {r['bldh']:.2f}<br>"
+        f"pop: {r['pop']:.0f} | infil: {r['infil']:.3f}<br>"
+        f"ahem: {r['ahem']:.1f}"
+    )
 
-def aggregate_citywide(pred, df_base):
-    pred = np.asarray(pred, dtype=float)
+    folium.CircleMarker(
+        location=[float(r["lat"]), float(r["lon"])],
+        radius=4,
+        color=color,
+        weight=1,
+        fill=True,
+        fill_color=color,
+        fill_opacity=0.85,
+        tooltip=tooltip,
+    ).add_to(m)
 
-    if TARGET_KIND == "UCD (W/m²)":
-        total_W = np.nansum(pred * CELL_AREA_M2)
-        total_MW = total_W / 1e6
-        return total_MW, None
+# Add legend/colorbar
+colormap.add_to(m)
 
-    pop = df_base["pop"].astype(float).values
-    total_W = np.nansum(pred * pop)
-    total_MW = total_W / 1e6
-    mean_Wpp = total_W / (np.nansum(pop) + 1e-12)
-    return total_MW, mean_Wpp
+st.subheader("Kolkata 1 km pixels")
+out = st_folium(m, width=1200, height=650)
 
-xs = np.linspace(x_min, x_max, n_points)
-mw = []
-wpp = []
+st.subheader("Clicked pixel (nearest)")
 
-X_base = df[FEATURE_COLS].copy()
+if out and out.get("last_clicked"):
+    click_lat = out["last_clicked"]["lat"]
+    click_lon = out["last_clicked"]["lng"]
 
-for xv in xs:
-    Xmod = X_base.copy()
+    # nearest pixel by squared distance
+    d = (df["lat"] - click_lat) ** 2 + (df["lon"] - click_lon) ** 2
+    idx = d.idxmin()
+    row = df.loc[idx].copy()
 
-    if policy_mode == "set_uniform":
-        Xmod[sweep_feature] = xv
-    else:
-        Xmod[sweep_feature] = np.clip(Xmod[sweep_feature].astype(float).values, x_min, x_max)
-
-    pred = model.predict(Xmod.values)
-    total_MW, mean_Wpp = aggregate_citywide(pred, df)
-    mw.append(total_MW)
-    wpp.app
+    st.write("Nearest pixel_group:", row["pixel_group"])
+    st.dataframe(row.to_frame("value"))
+else:
+    st.info("Click on a pixel marker to see the nearest pixel details.")

@@ -1,6 +1,11 @@
 streamlit
+folium
+streamlit-folium
+
 pandas
 numpy
-scikit-learn
+pyarrow
 joblib
+scikit-learn
 matplotlib
+branca
