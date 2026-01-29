@@ -1,6 +1,7 @@
-# Models
+# Tools
 
-This folder stores trained machine-learning models used by the Streamlit UCD optimizer app.
+This folder contains helper scripts used to prepare data and models for the app.
 
-Example:
-- ucd_model.joblib  → predicts UCD (W m-2) for 1 km × 1 km pixels
+Examples:
+- Convert Excel outputs into app-ready parquet files
+- Train and export ML models for Streamlit
