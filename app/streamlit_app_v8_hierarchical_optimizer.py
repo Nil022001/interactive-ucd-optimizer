@@ -17,7 +17,10 @@ from shapely.geometry import Point
 # =========================================================
 # CONFIG
 # =========================================================
-st.set_page_config(page_title="Kolkata UCD Estimator_SoC years (1 km)", layout="wide")
+st.set_page_config(
+    page_title="Kolkata UCD Estimator — SoC years (1 km × 1 km → ward → cityscale)",
+    layout="wide",
+)
 
 DATA_PARQUET = "data/pixels_baseline_2019.parquet"
 MODEL_FILE = "models/ucd_model.joblib"
@@ -249,8 +252,11 @@ if "ward_choice" not in st.session_state:
 if "ward_select_mode" not in st.session_state:
     st.session_state.ward_select_mode = "Replace selection with this ward"
 
-st.title("Urban Cooling Demand Optimizer — Kolkata (1 km × 1 km)")
-st.caption("City-scale policy → Local project → City-wide feedback (W m⁻²)")
+# =========================================================
+# APP HEADER (UPDATED NAME)
+# =========================================================
+st.title("Kolkata UCD Estimator — SoC years (1 km × 1 km → ward → cityscale)")
+st.caption("1 km pixels → ward selection → city-scale totals (UCD in W m⁻²)")
 
 # =========================================================
 # LEFT POP-UP (Sidebar controls)
