@@ -9,3 +9,8 @@ joblib
 scikit-learn
 matplotlib
 branca
+requests
+geopandas
+shapely
+fiona
+pyproj
