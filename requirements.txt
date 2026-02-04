@@ -13,4 +13,3 @@ requests
 geopandas
 shapely
 fiona
-pyproj
