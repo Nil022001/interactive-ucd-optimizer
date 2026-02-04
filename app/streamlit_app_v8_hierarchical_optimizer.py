@@ -17,7 +17,7 @@ from shapely.geometry import Point
 # =========================================================
 # CONFIG
 # =========================================================
-st.set_page_config(page_title="Kolkata UCD Optimizer (1 km)", layout="wide")
+st.set_page_config(page_title="Kolkata UCD Estimator_SoC years (1 km)", layout="wide")
 
 DATA_PARQUET = "data/pixels_baseline_2019.parquet"
 MODEL_FILE = "models/ucd_model.joblib"
