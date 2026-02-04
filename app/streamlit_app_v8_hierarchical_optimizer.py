@@ -193,9 +193,13 @@ def load_wards():
 
 
 @st.cache_data
-def build_pixel_ward_join(df_pixels: pd.DataFrame, wards_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
+def build_pixel_ward_join(df_pixels: pd.DataFrame, _wards_gdf: gpd.GeoDataFrame, wards_cache_key: float) -> pd.DataFrame:
     """
     Returns a DataFrame mapping pixel_group -> ward_idx (index in wards_gdf) using point-in-polygon.
+
+    IMPORTANT:
+    - _wards_gdf is prefixed with underscore so Streamlit will NOT try to hash it.
+    - wards_cache_key (file mtime) is passed so cache invalidates if wards file changes.
     """
     pixels_gdf = gpd.GeoDataFrame(
         df_pixels[["pixel_group", "lon", "lat"]].copy(),
@@ -205,7 +209,7 @@ def build_pixel_ward_join(df_pixels: pd.DataFrame, wards_gdf: gpd.GeoDataFrame) 
 
     joined = gpd.sjoin(
         pixels_gdf[["pixel_group", "geometry"]],
-        wards_gdf[["geometry"]].copy(),
+        _wards_gdf[["geometry"]].copy(),
         how="left",
         predicate="within",
     ).rename(columns={"index_right": "ward_idx"})
@@ -213,14 +217,17 @@ def build_pixel_ward_join(df_pixels: pd.DataFrame, wards_gdf: gpd.GeoDataFrame) 
     return pd.DataFrame(joined[["pixel_group", "ward_idx"]])
 
 
+# =========================================================
+# LOAD DATA + MODEL + WARDS
+# =========================================================
 df0 = load_pixels()
 bundle = load_model()
 model = bundle["model"]
 features = bundle["features"]
 
-# wards
 wards_gdf = load_wards()
-pix_in_ward = build_pixel_ward_join(df0, wards_gdf)
+wards_cache_key = float(os.path.getmtime(WARD_KML_PATH)) if os.path.exists(WARD_KML_PATH) else 0.0
+pix_in_ward = build_pixel_ward_join(df0, wards_gdf, wards_cache_key)
 
 # Try to find a label column (KML typically has "Name" or similar)
 ward_label_candidates = [c for c in wards_gdf.columns if c.lower() not in ["geometry"]]
@@ -341,7 +348,6 @@ with st.sidebar:
         if ward_select_mode.startswith("Replace"):
             st.session_state.selected_pixels = []
 
-        # add unique
         for pg in pg_list:
             if pg not in st.session_state.selected_pixels:
                 st.session_state.selected_pixels.append(pg)
@@ -349,12 +355,8 @@ with st.sidebar:
         st.success(f"Selected {len(pg_list)} pixels in that ward.")
         st.rerun()
 
-
 # =========================================================
 # BASELINE + CITY SCENARIO
-# IMPORTANT FIX:
-#   Baseline is "sanitized" with the SAME clipping rules as scenario,
-#   so if all deltas are zero, baseline == city == final.
 # =========================================================
 df = df0.copy()
 
@@ -463,11 +465,7 @@ def ward_style(_feat):
 
 ward_tooltip = None
 if WARD_LABEL_COL:
-    ward_tooltip = folium.GeoJsonTooltip(
-        fields=[WARD_LABEL_COL],
-        aliases=["Ward"],
-        sticky=True,
-    )
+    ward_tooltip = folium.GeoJsonTooltip(fields=[WARD_LABEL_COL], aliases=["Ward"], sticky=True)
 
 folium.GeoJson(
     wards_gdf,
@@ -487,7 +485,6 @@ try:
     ).add_to(m)
 
     b = chosen_poly.total_bounds  # [minx, miny, maxx, maxy]
-    # Only fit if bounds look sane
     if np.all(np.isfinite(b)) and (b[2] > b[0]) and (b[3] > b[1]):
         m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
 except Exception:
@@ -531,12 +528,9 @@ c_map, c_info = st.columns([2.8, 1.2], vertical_alignment="top")
 
 with c_map:
     st.markdown("### Map (click pixels; selected pixels get a black outline)")
-
-    # Prefer full-bleed container width (newer streamlit-folium)
     try:
         out = st_folium(m, use_container_width=True, height=720)
     except TypeError:
-        # fallback for older versions
         out = st_folium(m, width=1600, height=720)
 
 with c_info:
