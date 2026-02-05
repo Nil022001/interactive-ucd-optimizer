@@ -1,7 +1,6 @@
 streamlit
 folium
 streamlit-folium
-
 pandas
 numpy
 pyarrow
@@ -9,7 +8,9 @@ joblib
 scikit-learn
 matplotlib
 branca
-requests
 geopandas
 shapely
+requests
+xgboost
 fiona
+pyproj
